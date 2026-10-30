@@ -25,8 +25,12 @@ local SQL_METHODS = set([[
   fetchAll fetchScalar fetchSync
 ]])
 
--- Sanitizers whose result is bounded regardless of the input.
-local BOUNDING_CALLS = set("math.min math.max math.clamp lib.math.clamp")
+-- Functions returning a value still fully controlled by their input.
+local TRANSPARENT_CALLS = set("tonumber tostring string.lower string.upper string.gsub string.sub string.format math.floor math.ceil math.abs")
+local TRANSPARENT_METHODS = set("lower upper gsub sub format rep reverse")
+
+-- Removing something the client asked to remove fails safely when it is missing.
+local REMOVAL_SINKS = set("removeMoney RemoveMoney removeAccountMoney removeInventoryItem RemoveItem removeWeapon")
 
 local YIELD_CALLS = set("Wait Citizen.Wait Citizen.Await Await")
 
@@ -63,8 +67,18 @@ local function isDynamicString(expr)
     scan(expr)
     return dynamic
   end
-  if expr.type == "Call" and Ast.path(expr.func) == "string.format" then return #expr.args > 1 end
-  if expr.type == "MethodCall" and expr.method == "format" then return #expr.args > 0 end
+  -- A `%s` between backticks is a table or column name, which placeholders cannot replace.
+  local function formatsValues(text)
+    return (text:gsub("`%%s`", "")):find("%%[sdqi]") ~= nil
+  end
+  if expr.type == "Call" and Ast.path(expr.func) == "string.format" and #expr.args > 1 then
+    local text = Ast.unparen(expr.args[1])
+    return text.type ~= "String" or formatsValues(text.value)
+  end
+  if expr.type == "MethodCall" and expr.method == "format" and #expr.args > 0 then
+    local text = Ast.unparen(expr.object)
+    return text.type ~= "String" or formatsValues(text.value)
+  end
   return false
 end
 
@@ -73,7 +87,7 @@ local function analyzeHandler(ctx, handler, reported)
   local func = handler.func
   if not func or not func.paramVars then return end
 
-  local tainted, validated = {}, {}
+  local tainted, validated, derived = {}, {}, {}
   for i, var in ipairs(func.paramVars) do
     if i > handler.skip then tainted[var] = true end
   end
@@ -92,19 +106,16 @@ local function analyzeHandler(ctx, handler, reported)
     elseif kind == "Unop" then
       return mention(expr.operand)
     elseif kind == "Call" then
+      -- What any other function returns is server data, even when it received client input.
       local path = Ast.path(expr.func)
-      if path and BOUNDING_CALLS[path] then return nil end
-      for _, arg in ipairs(expr.args) do
-        local found = mention(arg)
-        if found then return found end
+      if path and TRANSPARENT_CALLS[path] then
+        for _, arg in ipairs(expr.args) do
+          local found = mention(arg)
+          if found then return found end
+        end
       end
     elseif kind == "MethodCall" then
-      local found = mention(expr.object)
-      if found then return found end
-      for _, arg in ipairs(expr.args) do
-        found = mention(arg)
-        if found then return found end
-      end
+      if TRANSPARENT_METHODS[expr.method] then return mention(expr.object) end
     elseif kind == "Table" then
       for _, field in ipairs(expr.fields) do
         local found = mention(field.value)
@@ -119,7 +130,11 @@ local function analyzeHandler(ctx, handler, reported)
     expr = Ast.unparen(expr)
     local kind = expr.type
     if kind == "Name" then
-      if expr.var and not boolContext then validated[expr.var] = true end
+      if expr.var then
+        if not boolContext then validated[expr.var] = true end
+        -- `local p = GetPlayer(id); if not p then return end` also vouches for `id`.
+        for _, origin in ipairs(derived[expr.var] or {}) do validated[origin] = true end
+      end
     elseif kind == "Index" then
       validate(expr.object, false)
       if not expr.dotted then validate(expr.key, false) end
@@ -151,6 +166,8 @@ local function analyzeHandler(ctx, handler, reported)
           reported[node] = true
           ctx.report("FX400", node, "'" .. var.name .. "' comes from the client (event '" .. handler.event .. "') and reaches " .. short .. " without validation", {
             hint = "check its type and bounds, or recompute the value on the server from your config",
+            severity = REMOVAL_SINKS[short] and "high" or nil,
+            confidence = REMOVAL_SINKS[short] and "medium" or nil,
           })
           break
         end
@@ -199,7 +216,21 @@ local function analyzeHandler(ctx, handler, reported)
     end)
   end
 
+  --- Records which tainted variables were passed to the call producing `var`.
+  local function recordOrigins(var, value)
+    derived[var] = nil
+    value = value and Ast.unparen(value)
+    if not value or (value.type ~= "Call" and value.type ~= "MethodCall") then return end
+    local origins = {}
+    for _, arg in ipairs(value.args) do
+      local found = mention(arg)
+      if found then origins[#origins + 1] = found end
+    end
+    if #origins > 0 then derived[var] = origins end
+  end
+
   local function propagate(var, value)
+    recordOrigins(var, value)
     if value and mention(value) then
       tainted[var] = true
       validated[var] = nil
@@ -305,7 +336,16 @@ local function checkSourceAfterYield(ctx, handler)
         end
         return
       end
-      scan(child, nested or child.type == "Function")
+      -- pcall and xpcall run their function right away: it is not a deferred callback.
+      local isProtectedCall = child.type == "Call"
+        and (Ast.path(child.func) == "pcall" or Ast.path(child.func) == "xpcall")
+      if isProtectedCall then
+        for _, arg in ipairs(child.args) do
+          if arg.type == "Function" then scan(arg, nested) else scan({ type = "Paren", expr = arg }, nested) end
+        end
+      else
+        scan(child, nested or child.type == "Function")
+      end
       if isYield(child) then yielded = true end
     end)
   end
@@ -354,7 +394,8 @@ local function checkDynamicCode(ctx, reported)
             hint = "unless you wrote this yourself, treat this resource as compromised",
           })
         elseif arg.type ~= "String" then
-          local fromResource = arg.type == "Call" and Ast.path(arg.func) == "LoadResourceFile"
+          local origin = arg.type == "Name" and arg.var and arg.var.init and Ast.unparen(arg.var.init) or arg
+          local fromResource = origin.type == "Call" and Ast.path(origin.func) == "LoadResourceFile"
           if not fromResource then
             ctx.report("FX403", node, "code is compiled from a value only known at runtime", {
               confidence = "medium", severity = "medium",
@@ -374,7 +415,10 @@ local function checkSystemCommands(ctx)
     if node.type == "Call" then
       local path = Ast.path(node.func)
       if path == "os.execute" or path == "io.popen" then
-        ctx.report("FX407", node, path .. " runs operating system commands; FiveM scripts have no legitimate need for it")
+        ctx.report("FX407", node, path .. " runs operating system commands; very few FiveM scripts have a good reason to", {
+          confidence = "medium",
+          hint = "read what this command does before starting this resource",
+        })
       end
     end
   end)
@@ -533,7 +577,11 @@ function Security.checkResource(resource)
   local netEvents = {}
   for _, ctx in ipairs(resource.files) do
     ctx.eventScan = ctx.eventScan or Events.scan(ctx.chunk)
-    if ctx.side == "server" or ctx.side == "shared" or ctx.side == "unknown" then
+    -- A shared file testing IsDuplicityVersion usually registers for the client only.
+    -- A file the manifest does not load registers nothing either.
+    local serverCallable = not ctx.isOrphan and (ctx.side == "server" or ctx.side == "unknown"
+      or (ctx.side == "shared" and not ctx.source:find("IsDuplicityVersion", 1, true)))
+    if serverCallable then
       for event in pairs(ctx.eventScan.netRegistered) do netEvents[event] = true end
     end
   end

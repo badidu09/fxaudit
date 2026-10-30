@@ -65,6 +65,44 @@ t.describe("security", function()
       t.eq(S.count("FX400", "ESX.RegisterServerCallback('a', function(source, cb, n) P.addMoney(n); cb() end)"), 1)
     end)
 
+    t.it("treats function results as server data", function()
+      t.eq(S.count("FX400", [[
+        RegisterNetEvent('a', function(id)
+          local target = GetPlayer(id)
+          P.addMoney(target.name)
+        end)
+      ]]), 0)
+    end)
+
+    t.it("keeps taint through conversions", function()
+      t.eq(S.count("FX400", "RegisterNetEvent('a', function(n) P.addMoney(tonumber(n)) end)"), 1)
+      t.eq(S.count("FX400", "RegisterNetEvent('a', function(n) P.addMoney(math.floor(n)) end)"), 1)
+    end)
+
+    t.it("lets a checked lookup vouch for its input", function()
+      t.eq(S.count("FX400", [[
+        RegisterNetEvent('a', function(id)
+          local target = GetPlayer(id)
+          if not target then return end
+          P.AddItem(id, 'x')
+        end)
+      ]]), 0)
+    end)
+
+    t.it("rates removals lower than additions", function()
+      t.eq(S.of("FX400", "RegisterNetEvent('a', function(n) P.removeMoney(n) end)")[1].severity, "high")
+    end)
+
+    t.it("ignores client-only registration in a shared file", function()
+      local extra = { files = { { path = "s.lua", side = "shared",
+        source = "if not IsDuplicityVersion() then RegisterNetEvent('a', print) end" } } }
+      t.eq(S.count("FX400", "AddEventHandler('a', function(n) P.addMoney(n) end)", "server", extra), 0)
+    end)
+
+    t.it("recognizes ESX.SecureNetEvent", function()
+      t.eq(S.count("FX400", "ESX.SecureNetEvent('a', function(n) P.addMoney(n) end)"), 1)
+    end)
+
     t.it("flags ExecuteCommand", function()
       t.eq(S.count("FX400", "RegisterNetEvent('a', function(c) ExecuteCommand(c) end)"), 1)
     end)
@@ -92,6 +130,10 @@ t.describe("security", function()
       t.eq(S.count("FX402", "RegisterNetEvent('a', function() MySQL.query('x', {}, function() print(source) end) end)"), 1)
     end)
 
+    t.it("treats pcall as immediate", function()
+      t.eq(S.count("FX402", "RegisterNetEvent('a', function() pcall(function() print(source) end) end)"), 0)
+    end)
+
     t.it("accepts the local copy", function()
       t.eq(S.count("FX402", "RegisterNetEvent('a', function() local src = source Wait(10) print(src) end)"), 0)
     end)
@@ -101,6 +143,7 @@ t.describe("security", function()
     t.eq(S.count("FX403", "local s = GetConvar('a', '')\nload(s)()"), 1)
     t.eq(S.count("FX403", "load(LoadResourceFile('r', 'f.lua'))()"), 0)
     t.eq(S.count("FX403", "load('return 1')()"), 0)
+    t.eq(S.count("FX403", "local f = LoadResourceFile('r', 'f.lua')\nload(f)()"), 0)
   end)
 
   t.it("FX404 flags downloaded and client-supplied code", function()
@@ -154,6 +197,8 @@ t.describe("security", function()
     t.it("accepts parameters and constants", function()
       t.eq(S.count("FX410", "MySQL.query('SELECT ?', { 1 })"), 0)
       t.eq(S.count("FX410", "MySQL.query('SELECT * FROM ' .. TABLE_NAME)"), 0)
+      t.eq(S.count("FX410", "local n = f()\nMySQL.query(('ALTER TABLE `%s` ADD x'):format(n))"), 0)
+      t.eq(S.count("FX410", "local n = f()\nMySQL.query(('SELECT %s'):format(n))"), 1)
     end)
 
     t.it("recognizes the exports syntax", function()

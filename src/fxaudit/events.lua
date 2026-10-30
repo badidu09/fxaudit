@@ -34,12 +34,15 @@ function Events.scan(chunk)
     local first = node.args[1] and Ast.unparen(node.args[1])
     local event = first and first.type == "String" and first.value or nil
 
-    if name == "RegisterNetEvent" or name == "RegisterServerEvent" then
+    -- ESX.SecureNetEvent is ESX's wrapper around RegisterNetEvent.
+    if name == "RegisterNetEvent" or name == "RegisterServerEvent" or name:find("%.SecureNetEvent$") then
       if event then
         result.netRegistered[event] = result.netRegistered[event] or node
-        local func = resolveHandler(node.args[2])
-        if func then
-          result.handlers[#result.handlers + 1] = { event = event, func = func, node = node, kind = "net", skip = 0 }
+        -- A handler may be an opaque value: it still counts as handled, with `func` nil.
+        if node.args[2] then
+          result.handlers[#result.handlers + 1] = {
+            event = event, func = resolveHandler(node.args[2]), node = node, kind = "net", skip = 0,
+          }
         end
       end
     elseif name == "AddEventHandler" then
