@@ -8,6 +8,8 @@ local Analyzer = {}
 
 local RULE_MODULES = {
   "fxaudit.rules.variables",
+  "fxaudit.rules.correctness",
+  "fxaudit.rules.security",
 }
 
 local SYNTAX_KINDS = { syntax = "FX100", ["break"] = "FX101", vararg = "FX102", hint = "FX105" }
