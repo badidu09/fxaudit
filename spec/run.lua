@@ -3,7 +3,7 @@ package.path = "src/?.lua;src/?/init.lua;./?.lua;" .. package.path
 
 local t = require("spec.harness")
 
-for _, name in ipairs({ "lexer", "parser" }) do
+for _, name in ipairs({ "lexer", "parser", "scope" }) do
   require("spec." .. name .. "_spec")
 end
 
