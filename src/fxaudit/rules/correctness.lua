@@ -55,8 +55,10 @@ local function checkBlock(ctx, body)
   for i = 1, #body - 1 do
     if endsFlow(body[i]) then
       local nextStatement = body[i + 1]
-      -- A label is a jump target, so what follows may still run.
-      if nextStatement.type ~= "Label" then
+      -- A label is a jump target, so what follows may still run. A bare `return`
+      -- after error() is a harmless habit.
+      local harmless = nextStatement.type == "Return" and #nextStatement.values == 0
+      if nextStatement.type ~= "Label" and not harmless then
         ctx.report("FX302", nextStatement, "this code can never run: the previous statement at line " .. body[i].line .. " always exits")
       end
       break
@@ -205,15 +207,27 @@ local function checkRemoveInLoop(ctx, loop)
   local step = loop.step and Ast.unparen(loop.step)
   if step and not (step.type == "Number" and step.value > 0) then return end
   local name = loop.var.name
-  Ast.walk({ type = "Do", body = loop.body }, function(node)
-    if node.type == "Function" then return false end
-    if node.type == "Call" and Ast.path(node.func) == "table.remove" and node.args[2]
-      and node.args[2].type == "Name" and node.args[2].name == name then
-      ctx.report("FX312", node, "removing index '" .. name .. "' while iterating forward skips the next element", {
-        hint = "iterate backwards: for " .. name .. " = #t, 1, -1 do",
-      })
+
+  --- Leaving the loop right after the removal is safe: nothing gets skipped.
+  local function scan(body)
+    local last = body[#body]
+    local leaves = last and (last.type == "Break" or last.type == "Return" or last.type == "Goto")
+    for _, statement in ipairs(body) do
+      if statement.type == "CallStat" then
+        local node = statement.expr
+        if node.type == "Call" and Ast.path(node.func) == "table.remove" and node.args[2]
+          and node.args[2].type == "Name" and node.args[2].name == name and not leaves then
+          ctx.report("FX312", node, "removing index '" .. name .. "' while iterating forward skips the next element", {
+            hint = "iterate backwards: for " .. name .. " = #t, 1, -1 do",
+          })
+        end
+      else
+        for _, inner in ipairs(blocksOf(statement)) do scan(inner) end
+      end
     end
-  end)
+  end
+
+  scan(loop.body)
 end
 
 function Correctness.checkFile(ctx)
@@ -222,8 +236,9 @@ function Correctness.checkFile(ctx)
     for _, body in ipairs(blocksOf(node)) do checkBlock(ctx, body) end
 
     if kind == "Binop" then
+      -- `x == x` and `x ~= x` on a plain variable are the standard NaN test.
       if COMPARISON[node.op] and not hasCall(node.left) and Ast.sameExpr(node.left, node.right)
-        and not (node.op == "~=" and Ast.unparen(node.left).type == "Name") then
+        and not ((node.op == "~=" or node.op == "==") and Ast.unparen(node.left).type == "Name") then
         ctx.report("FX300", node, "this expression is compared with itself")
       end
       if node.op == "==" or node.op == "~=" then
