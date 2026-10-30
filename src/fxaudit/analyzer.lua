@@ -10,6 +10,9 @@ local RULE_MODULES = {
   "fxaudit.rules.variables",
   "fxaudit.rules.correctness",
   "fxaudit.rules.security",
+  "fxaudit.rules.performance",
+  "fxaudit.rules.leaks",
+  "fxaudit.rules.events",
 }
 
 local SYNTAX_KINDS = { syntax = "FX100", ["break"] = "FX101", vararg = "FX102", hint = "FX105" }
