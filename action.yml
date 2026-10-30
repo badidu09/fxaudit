@@ -1,0 +1,33 @@
+name: fxaudit
+description: Static analysis of FiveM resources, with results in GitHub code scanning.
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  path:
+    description: Folder to analyze.
+    default: .
+  fail-on:
+    description: Fail from this level (critical, high, medium, low, info or never).
+    default: high
+  sarif:
+    description: Path of the SARIF report to write.
+    default: fxaudit.sarif
+
+runs:
+  using: composite
+  steps:
+    - uses: leafo/gh-actions-lua@v10
+      with:
+        luaVersion: "5.4"
+    - name: Run fxaudit
+      shell: bash
+      env:
+        FXAUDIT_PATH: ${{ inputs.path }}
+        FXAUDIT_FAIL_ON: ${{ inputs.fail-on }}
+        FXAUDIT_SARIF: ${{ inputs.sarif }}
+      run: |
+        # The report comes first: the second scan is the one allowed to fail the job.
+        lua "$GITHUB_ACTION_PATH/bin/fxaudit" scan "$FXAUDIT_PATH" -f sarif -o "$FXAUDIT_SARIF" --fail-on never
+        lua "$GITHUB_ACTION_PATH/bin/fxaudit" scan "$FXAUDIT_PATH" --no-color --fail-on "$FXAUDIT_FAIL_ON"
