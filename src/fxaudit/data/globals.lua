@@ -26,7 +26,7 @@ Globals.shared = set([[
   AddStateBagChangeHandler RemoveStateBagChangeHandler NewStateBag
   GetCurrentResourceName LoadResourceFile IsDuplicityVersion
   FormatStackTrace
-  Log
+  Log source joaat
 ]])
 
 Globals.client = set([[
@@ -35,7 +35,7 @@ Globals.client = set([[
 ]])
 
 Globals.server = set([[
-  source TriggerClientEvent TriggerLatentClientEvent GetPlayers GetPlayerIdentifiers
+  TriggerClientEvent TriggerLatentClientEvent GetPlayers GetPlayerIdentifiers
   GetPlayerTokens PerformHttpRequest PerformHttpRequestAwait RegisterCommand
   GetPlayerIdentifierByType GetAllPeds GetAllVehicles GetAllObjects
 ]])
@@ -44,7 +44,7 @@ Globals.server = set([[
 Globals.imports = {
   ["ox_lib/init.lua"] = { "lib", "cache", "locale", "require", "qbx" },
   ["oxmysql/lib/MySQL.lua"] = { "MySQL" },
-  ["es_extended/imports.lua"] = { "ESX", "Core" },
+  ["es_extended/imports.lua"] = { "ESX", "Core", "xLib" },
   ["es_extended/locale.lua"] = { "Locale", "_U", "_" },
   ["qb-core/shared/locale.lua"] = { "Locale", "Lang" },
   ["qbx_core/modules/lib.lua"] = { "qbx" },

@@ -9,6 +9,7 @@ binding convention: GET_PLAYER_PED becomes GetPlayerPed.
 """
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -25,7 +26,9 @@ def load(path_or_name):
 
 
 def lua_name(native_name):
-    return "".join(part[:1].upper() + part[1:].lower() for part in native_name.split("_") if part)
+    # Same rule as the runtime: an underscore before a digit stays (GetGroundZFor_3dCoord).
+    lowered = re.sub(r"_([a-z])", lambda match: match.group(1).upper(), native_name.lower().lstrip("_"))
+    return lowered[:1].upper() + lowered[1:]
 
 
 def collect(database, default_side, sides):
