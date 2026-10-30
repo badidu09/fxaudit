@@ -1,0 +1,6 @@
+*.sarif
+fxaudit-report.*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
