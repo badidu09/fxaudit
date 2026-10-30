@@ -1,0 +1,24 @@
+#!/usr/bin/env lua
+-- Entry point: finds the sources next to this script, whatever the current folder.
+local script = (arg and arg[0] or "fxaudit"):gsub("\\", "/")
+local root = script:match("^(.*)/bin/[^/]*$") or (script:match("^bin/") and ".") or ".."
+package.path = root .. "/src/?.lua;" .. root .. "/src/?/init.lua;" .. package.path
+
+local Cli = require("fxaudit.cli")
+
+local args = {}
+for i = 1, #arg do args[i] = arg[i] end
+
+local function supportsColor()
+  if os.getenv("NO_COLOR") then return false end
+  return os.getenv("FORCE_COLOR") ~= nil or os.getenv("WT_SESSION") ~= nil
+    or os.getenv("TERM_PROGRAM") ~= nil or (os.getenv("TERM") or "dumb") ~= "dumb"
+end
+
+local code = Cli.run(args, {
+  write = function(text) io.stdout:write(text) end,
+  err = function(text) io.stderr:write(text) end,
+  supportsColor = supportsColor(),
+})
+io.stdout:flush()
+os.exit(code)
