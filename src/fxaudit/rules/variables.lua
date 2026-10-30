@@ -98,8 +98,8 @@ local function collectGuarded(chunk)
 end
 
 --- Collects the names `_G.x = ...` and `rawset(_G, "x", ...)` define.
-local function explicitGlobals(ctx, add)
-  Ast.walk(ctx.chunk, function(node)
+function Variables.explicitGlobals(chunk, add)
+  Ast.walk(chunk, function(node)
     if node.type == "Assign" then
       for _, target in ipairs(node.targets) do
         if target.type == "Index" and target.object.type == "Name"
@@ -131,7 +131,7 @@ local function buildDefinitions(resource)
     for _, ref in ipairs(ctx.info.globals) do
       if ref.write then add(ref.name) end
     end
-    explicitGlobals(ctx, add)
+    Variables.explicitGlobals(ctx.chunk, add)
   end
   return defined
 end

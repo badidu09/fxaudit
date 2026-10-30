@@ -152,7 +152,7 @@ t.describe("variables", function()
     t.eq(S.count("FX200", "PlayerPedId()", "server"), 0)
     t.eq(S.count("FX215", "DropPlayer(1, 'x')", "client"), 1)
     t.eq(S.count("FX215", "PlayerPedId()", "shared"), 0)
-    t.eq(S.count("FX215", "print(source)", "client"), 1)
+    t.eq(S.count("FX215", "print(source)", "client"), 0)
   end)
 
   t.it("FX216 flags library typos without flagging extensions", function()

@@ -194,6 +194,7 @@ function Scope.analyze(chunk)
             or node.values[#node.values].type == "Vararg"))
           or node.unpackFrom ~= nil
         local var = declare(info, "local", info.attrib, hasInit)
+        var.init = node.values[i]
         if node.values[i] and node.values[i].type == "Function" then
           var.funcValue = node.values[i]
           var.kind = "function"
